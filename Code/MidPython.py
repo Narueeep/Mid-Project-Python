@@ -39,29 +39,31 @@ st.markdown(variables)
 ### Cleaning data ###
 df = df.dropna()
 df = df.drop_duplicates()
-df = df[(df['Quantity'] >= 0) & (df['UnitPrice'] >= 0)]
 
-cl1 , cl2 = st.columns(2)
-with cl1:
-    with st.expander("Cleaned data"):
-        st.markdown(f"*Number of orders by members: {len(df):,}*")
-        st.write(df)
+df['TotalSales'] = df['Quantity'] * df['UnitPrice']
+canceled_products = df[df['InvoiceNo'].str.contains('C', na=False)]
 
-    csv = df.to_csv().encode("utf-8")
-    st.download_button(
-        label="Download cleaned data as CSV",
-        data=csv,
-        file_name="Cleaned E-Commerce data.csv",
-        mime="text/csv",
-    )
 
-with cl2:
-    df_summary = pd.DataFrame([{'products': len(df['StockCode'].value_counts()),    
-                'transactions': len(df['InvoiceNo'].value_counts()),
-                'customers': len(df['CustomerID'].value_counts()),
-                'countries': len(df['Country'].value_counts()) 
-                }], columns = ['products', 'transactions', 'customers', 'countries'], index = ['quantity'])
-    st.dataframe(df_summary)
+with st.expander("Cleaned data"):
+    st.markdown(f"*Number of orders by members: {len(df):,}*")
+    st.markdown(f"Number of products that were canceled: {len(canceled_products)}")
+    st.write(df)
+
+csv = df.to_csv().encode("utf-8")
+st.download_button(
+    label="Download cleaned data as CSV",
+    data=csv,
+    file_name="Cleaned E-Commerce data.csv",
+    mime="text/csv",
+)
+
+
+df_summary = pd.DataFrame([{'products': len(df['StockCode'].value_counts()),    
+                    'transactions': len(df['InvoiceNo'].value_counts()),
+                    'customers': len(df['CustomerID'].value_counts()),
+                    'countries': len(df['Country'].value_counts()) 
+            }], columns = ['products', 'transactions', 'customers', 'countries'], index = ['quantity'])
+st.dataframe(df_summary)
 
 #--------------------------------------------------------------------------------------------------------------------------
 
@@ -106,13 +108,59 @@ st.plotly_chart(choromap)
 
 #--------------------------------------------------------------------------------------------------------------------------
 
+# Graph comparing total sales vs canceled sales
+totalSales_canceled = canceled_products['TotalSales'].sum()
+totalSales_non_canceled = df['TotalSales'].sum()
+
+# Create DataFrame for Comparing
+sales_comparison = pd.DataFrame({
+    'Status': ['Non-Canceled', 'Canceled'],
+    'Total Sales': [totalSales_non_canceled, totalSales_canceled]
+})
+
+st.subheader("Comparison of Total Sales")
+# graph
+fig_bar1 = px.bar(sales_comparison, x='Status',y='Total Sales',text='Total Sales',
+                  title="Comparison of Total Sales: Non-Canceled vs Canceled Orders",
+                  color='Status',
+                  color_discrete_map={'Non-Canceled': 'green', 'Canceled': 'red'}
+)
+st.plotly_chart(fig_bar1, use_container_width=True)
+
+# download_button
+with st.expander("View Data of Comparison of Total Sales:"):
+        st.write(sales_comparison.style.background_gradient(cmap = "Blues"))
+        csv = sales_comparison.to_csv(index = False).encode("utf-8")
+        st.download_button('Download Data' , data = csv , file_name = "Comparison_TotalSales.csv" , mime = 'text/csv')
+
+#--------------------------------------------------------------------------------------------------------------------------
+
+# Table Non-Canceled Orders vs Canceled Orders
+
+cl1 , cl2 = st.columns(2)
+with cl1:
+    df = df[~df.isin(canceled_products)].dropna()
+    st.subheader("Non-Canceled Orders")
+    st.write(df)
+    st.write(f"*Number of orders by members: {len(df):,}*")
+
+with cl2:
+    st.subheader("Canceled Orders")
+    st.write(canceled_products)
+    st.write(f"Number of products that were canceled: {len(canceled_products)}")
+
+#--------------------------------------------------------------------------------------------------------------------------
+
 # Customer Invoice Summary
 st.subheader("Customer Invoice Summary")
-df_productCount = df.groupby(by=['CustomerID', 'InvoiceNo'], as_index=False).agg({'InvoiceDate': 'count','Quantity': 'sum'})
+df_productCount = df.groupby(by=['InvoiceNo', 'CustomerID'], as_index=False).agg({'InvoiceDate': 'count','Quantity': 'sum'})
 df_productCount = df_productCount.rename(columns={'InvoiceDate': 'List Product per Invoice','Quantity': 'Total Quantity Product'})
-df_productCount[:10].sort_values('CustomerID')
 
-st.dataframe(df_productCount)
+df_productCount['order_canceled'] = df_productCount['InvoiceNo'].apply(lambda x:int('C' in x))
+
+n1 = df_productCount['order_canceled'].sum()
+n2 = df_productCount.shape[0]
+st.dataframe(df_productCount , width = 1000)
 
 #--------------------------------------------------------------------------------------------------------------------------
 
@@ -231,8 +279,8 @@ time_period_sales = filtered_df.groupby('TimePeriod' , as_index=False)['TotalSal
 st.subheader("Sales by Time Period")
 
 # graph
-fig_bar1 = px.bar(time_period_sales, x='TimePeriod', y='TotalSales', color='TimePeriod')
-st.plotly_chart(fig_bar1, use_container_width=True)
+fig_bar2 = px.bar(time_period_sales, x='TimePeriod', y='TotalSales', color='TimePeriod')
+st.plotly_chart(fig_bar2, use_container_width=True)
 
 # download_button
 with st.expander("View Data of Sales by Time Period:"):
@@ -256,6 +304,44 @@ with st.expander("View Data of Product Sales Summary:"):
         st.write(filtered_df_product.style.background_gradient(cmap = "Oranges"))
         csv = filtered_df_product.to_csv(index = False).encode("utf-8")
         st.download_button('Download Data' , data = csv , file_name = "ProductSales_Summary.csv" , mime = 'text/csv')
+
+
+# Top 5
+
+# : Total Quantity
+# Select the top 5
+top_5_products = filtered_df_product.nlargest(5, 'Total Quantity')
+
+# graph
+#st.subheader("Top 5 Products by Total Quantity")
+fig_pie2 = px.pie(top_5_products, values = top_5_products['Total Quantity'] , names = 'Description',
+                  title = "Top 5 Products by Total Quantity")
+fig_pie2.update_traces(text = filtered_df['Description'] , textposition = "outside")
+st.plotly_chart(fig_pie2)
+
+
+# : TotalSales
+# Select the top 5
+top_5_products = filtered_df_product.nlargest(5, 'TotalSales per Procuct')
+
+# graph
+#st.subheader("Top 5 Products by TotalSales per Procuct")
+fig_pie2 = px.pie(top_5_products, values = top_5_products['TotalSales per Procuct'] , names = 'Description',
+                  title = "Top 5 Products by TotalSales per Procuct")
+fig_pie2.update_traces(text = filtered_df['Description'] , textposition = "outside")
+st.plotly_chart(fig_pie2)
+
+
+# : Total orders per product
+# Select the top 5
+top_5_products = filtered_df_product.nlargest(5, 'Total orders per product')
+
+# graph
+#st.subheader("Top 5 Products by Total orders per product")
+fig_pie2 = px.pie(top_5_products, values = top_5_products['Total orders per product'] , names = 'Description',
+                  title = "Top 5 Products by Total orders per product")
+fig_pie2.update_traces(text = filtered_df['Description'] , textposition = "outside")
+st.plotly_chart(fig_pie2)
 
 #--------------------------------------------------------------------------------------------------------------------------
 
